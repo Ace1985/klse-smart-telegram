@@ -7,7 +7,8 @@ import yfinance as yf
 from config import BUY_SCORE, WATCH_SCORE, BUY_ZONE_DISCOUNT, MAX_FAIR_PE
 
 TZ=ZoneInfo('Asia/Kuala_Lumpur')
-TOKEN=os.environ['TELEGRAM_TOKEN']; CHAT_ID=os.environ['TELEGRAM_CHAT_ID']
+TOKEN=os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID=os.environ.get('TELEGRAM_CHAT_ID')
 
 def num(x):
     try:
@@ -17,6 +18,7 @@ def num(x):
 
 def pct(x): return f'{x:.1f}%' if x is not None else 'N/A'
 def money(x): return f'RM{x:.2f}' if x is not None else 'N/A'
+def fmt_val(x, fmt='{:.2f}'): return fmt.format(x) if x is not None else 'N/A'
 
 def growth_from(df,names):
     if df is None or df.empty: return None
@@ -68,15 +70,28 @@ def analyze(symbol):
     return dict(symbol=symbol.replace('.KL',''),price=price,score=score,fair_value=fair_value,buy_zone=buy_zone,discount=discount,peg=peg,roe=roe,rg=rg,pg=pg,status=status)
 
 def send(text):
+    if not TOKEN or not CHAT_ID:
+        print("Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID environment variable is missing!")
+        return
     r=requests.post(f'https://api.telegram.org/bot{TOKEN}/sendMessage',data={'chat_id':CHAT_ID,'text':text},timeout=20); r.raise_for_status()
 
 def main():
-    syms=[x.strip().upper() for x in open('stocks.txt',encoding='utf8') if x.strip() and not x.startswith('#')]
+    syms=[x.strip().upper().lstrip('$') for x in open('stocks.txt',encoding='utf8') if x.strip() and not x.startswith('#')]
     syms=[x if x.endswith('.KL') else x+'.KL' for x in syms]
     out=[]
     for s in syms:
-        try: out.append(analyze(s))
+        try:
+            res = analyze(s)
+            if res and res.get('price') is not None:
+                out.append(res)
+            else:
+                print(f"Skipping {s}: No price data returned from Yahoo Finance.")
         except Exception as e: print(s,e)
+    
+    if not out:
+        print("No valid stock data returned for any tickers.")
+        return
+
     out.sort(key=lambda x:x['score'],reverse=True)
     lines=[f"📊 KLSE SMART REPORT\n{datetime.now(TZ):%d %b %Y %H:%M}"]
     for label,st in [('🟢 BUY ZONE','🟢 BUY'),('🟡 WATCHLIST','🟡 WATCH'),('🔴 OVERVALUED / AVOID','🔴 OVERVALUED'),('🔴 AVOID','🔴 AVOID')]:
@@ -84,7 +99,8 @@ def main():
         if not g: continue
         lines.append('\n'+label)
         for x in g:
-            lines.append(f"\n{x['symbol']} | {money(x['price'])} | Score {x['score']}/100\nFair Value {money(x['fair_value'])} | Buy Zone {money(x['buy_zone'])}\nDiscount {pct(x['discount'])} | PEG {x['peg']:.2f} | ROE {pct(x['roe'])}\nRevenue G {pct(x['rg'])} | Profit G {pct(x['pg'])}")
+            lines.append(f"\n{x['symbol']} | {money(x['price'])} | Score {x['score']}/100\nFair Value {money(x['fair_value'])} | Buy Zone {money(x['buy_zone'])}\nDiscount {pct(x['discount'])} | PEG {fmt_val(x['peg'])} | ROE {pct(x['roe'])}\nRevenue G {pct(x['rg'])} | Profit G {pct(x['pg'])}")
     lines.append('\n⚠️ Screening tool only, not financial advice. Free-market data may be delayed/incomplete.')
     send('\n'.join(lines))
+
 if __name__=='__main__': main()
