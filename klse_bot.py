@@ -1,410 +1,250 @@
-import os
-import math
+import os, math
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
 import pandas as pd
 import requests
 import yfinance as yf
-
 from config import BUY_SCORE, WATCH_SCORE, BUY_ZONE_DISCOUNT, MAX_FAIR_PE
 
-TZ = ZoneInfo("Asia/Kuala_Lumpur")
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TZ = ZoneInfo('Asia/Kuala_Lumpur')
+TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+MODE = os.environ.get('REPORT_MODE', 'close').lower()
 
 STOCK_NAMES = {
-    "1155": "MAYBANK", "1023": "CIMB", "1295": "PBBANK",
-    "1146": "RHBBANK", "4162": "HLBANK", "4707": "AMBANK",
-    "5347": "TENAGA", "6742": "YTLPOWR", "4677": "YTL",
-    "5211": "SUNWAY", "5014": "GAMUDA", "6947": "CelcomDigi",
-    "6888": "AXIATA", "5225": "IHH", "5183": "PCHEM",
-    "0166": "INARI", "0138": "MYEG", "0097": "VITROX",
-    "0208": "GREATEC", "0273": "NATGATE", "0256": "UMC",
-    "5341": "LACMED",
+    '1155':'MAYBANK','1023':'CIMB','1295':'PBBANK','1146':'RHBBANK','4162':'HLBANK','4707':'AMBANK',
+    '5347':'TENAGA','6742':'YTLPOWR','4677':'YTL','5211':'SUNWAY','5014':'GAMUDA','6947':'CelcomDigi',
+    '6888':'AXIATA','5225':'IHH','5183':'PCHEM','0166':'INARI','0138':'MYEG','0097':'VITROX',
+    '0208':'GREATEC','0273':'NATGATE','0256':'UMC','5341':'LACMED'
 }
+
+POSITIVE_NEWS = ['profit growth','profit rises','profit surge','earnings growth','earnings beat','revenue growth','contract win','new contract','dividend','upgrade','surge','growth','strong demand']
+NEGATIVE_NEWS = ['profit drop','profit falls','profit decline','loss','downgrade','risk','lawsuit','weak','drop','decline','guidance cut','slowdown','warning']
 
 def num(x):
     try:
-        x = float(x)
-        return x if math.isfinite(x) else None
-    except (TypeError, ValueError):
-        return None
+        x=float(x); return x if math.isfinite(x) else None
+    except (TypeError,ValueError): return None
 
-def pct(x):
-    return f"{x:.1f}%" if x is not None else "N/A"
-
-def money(x):
-    return f"RM{x:.2f}" if x is not None else "N/A"
-
-def fmt_val(x, fmt="{:.2f}"):
-    return fmt.format(x) if x is not None else "N/A"
-
-def safe_last(series):
+def pct(x): return f'{x:.1f}%' if x is not None else 'N/A'
+def money(x): return f'RM{x:.2f}' if x is not None else 'N/A'
+def fmt(x, f='{:.2f}'): return f.format(x) if x is not None else 'N/A'
+def safe_last(s):
     try:
-        s = pd.to_numeric(series, errors="coerce").dropna()
-        return num(s.iloc[-1]) if not s.empty else None
-    except Exception:
-        return None
+        s=pd.to_numeric(s,errors='coerce').dropna(); return num(s.iloc[-1]) if not s.empty else None
+    except Exception: return None
 
-def growth_from(df, names):
-    if df is None or df.empty:
-        return None
+def growth_from(df,names):
+    if df is None or df.empty: return None
     for name in names:
         if name in df.index:
             try:
-                values = pd.to_numeric(df.loc[name], errors="coerce").dropna().tolist()
-                if len(values) >= 2 and values[-2] != 0:
-                    return (values[-1] / values[-2] - 1) * 100
-            except Exception:
-                pass
+                v=pd.to_numeric(df.loc[name],errors='coerce').dropna().tolist()
+                if len(v)>=2 and v[-2]!=0: return (v[-1]/v[-2]-1)*100
+            except Exception: pass
     return None
 
-def get_macro_summary():
+def html(s):
+    s='' if s is None else str(s)
+    return s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+
+def macro():
+    out={'klci':None,'chg':None,'usd':None,'brent':None}
     try:
-        klci = yf.Ticker("^KLSE").history(period="5d")
-        usd_myr = yf.Ticker("MYR=X").history(period="5d")
-        brent = yf.Ticker("BZ=F").history(period="5d")
-
-        kc = pd.to_numeric(klci["Close"], errors="coerce").dropna()
-        uc = pd.to_numeric(usd_myr["Close"], errors="coerce").dropna()
-        bc = pd.to_numeric(brent["Close"], errors="coerce").dropna()
-
-        kp = safe_last(kc)
-        up = safe_last(uc)
-        bp = safe_last(bc)
-        chg = (kc.iloc[-1] / kc.iloc[-2] - 1) * 100 if len(kc) >= 2 else None
-
-        ktxt = (f"{kp:.2f} ({'+' if chg is not None and chg >= 0 else ''}{chg:.2f}%)"
-                if kp is not None and chg is not None else "N/A")
-        utxt = f"{up:.4f}" if up is not None else "N/A"
-        btxt = f"${bp:.2f}" if bp is not None else "N/A"
-
-        return f"🌐 MARKET\nKLCI: {ktxt}\nUSD/MYR: {utxt} | Brent: {btxt}\n"
-    except Exception as e:
-        print(f"Macro data error: {e}")
-        return "🌐 MARKET\nKLCI: N/A | USD/MYR: N/A | Brent: N/A\n"
-
-def get_news_titles(ticker, limit=2):
-    titles = []
+        c=pd.to_numeric(yf.Ticker('^KLSE').history(period='5d')['Close'],errors='coerce').dropna()
+        if not c.empty:
+            out['klci']=num(c.iloc[-1]); out['chg']=num((c.iloc[-1]/c.iloc[-2]-1)*100) if len(c)>=2 else None
+    except Exception: pass
     try:
-        for item in (ticker.news or [])[:limit]:
-            title = item.get("title") if isinstance(item, dict) else None
-            if not title and isinstance(item, dict):
-                content = item.get("content")
-                if isinstance(content, dict):
-                    title = content.get("title")
-            if title:
-                titles.append(str(title))
-    except Exception as e:
-        print(f"News error: {e}")
-    return titles
+        c=pd.to_numeric(yf.Ticker('MYR=X').history(period='5d')['Close'],errors='coerce').dropna()
+        out['usd']=safe_last(c)
+    except Exception: pass
+    try:
+        c=pd.to_numeric(yf.Ticker('BZ=F').history(period='5d')['Close'],errors='coerce').dropna()
+        out['brent']=safe_last(c)
+    except Exception: pass
+    return out
 
-def get_ai_impact_analysis(score, dy, rg, pg, news_titles):
-    impact = []
-    if score >= 65:
-        impact.append("基本面坚挺，抗跌能力较强")
-    elif score <= 35:
-        impact.append("基本面受压，短期提振动力不足")
-    if dy is not None and dy >= 4:
-        impact.append("高股息率提供下行安全垫")
-    if pg is not None and pg < 0:
-        impact.append("盈利负增长为主要隐忧")
+def macro_text(m):
+    kc='N/A' if m['klci'] is None else f"{m['klci']:.2f} ({'+' if m['chg'] is not None and m['chg']>=0 else ''}{m['chg']:.2f}%)" if m['chg'] is not None else f"{m['klci']:.2f}"
+    us='N/A' if m['usd'] is None else f"{m['usd']:.4f}"
+    br='N/A' if m['brent'] is None else f"${m['brent']:.2f}"
+    return f"🌐 <b>MARKET</b>\nKLCI: {kc}\nUSD/MYR: {us} | Brent: {br}\n"
 
-    news = " ".join(news_titles).lower()
-    positive = ["profit growth", "profit rises", "profit surge", "earnings growth",
-                "earnings beat", "revenue growth", "contract win", "new contract",
-                "dividend", "upgrade", "surge", "growth"]
-    negative = ["profit drop", "profit falls", "profit decline", "loss", "downgrade",
-                "risk", "lawsuit", "weak", "drop", "decline"]
+def rsi(series,period=14):
+    if series is None or len(series)<period+1: return None
+    d=series.diff(); g=d.clip(lower=0); l=-d.clip(upper=0)
+    ag=g.rolling(period).mean().iloc[-1]; al=l.rolling(period).mean().iloc[-1]
+    if al==0: return 100.0 if ag>0 else 50.0
+    return num(100-(100/(1+ag/al)))
 
-    if any(w in news for w in positive):
-        impact.append("最新消息偏向正面")
-    elif any(w in news for w in negative):
-        impact.append("新闻面偏向谨慎与观望")
-    return " | ".join(impact) if impact else "缺乏显著催化剂，跟随大盘波动"
+def news(ticker):
+    out=[]
+    try:
+        for n in (ticker.news or [])[:3]:
+            title=n.get('title') if isinstance(n,dict) else None
+            if not title and isinstance(n,dict) and isinstance(n.get('content'),dict): title=n['content'].get('title')
+            if title: out.append(str(title))
+    except Exception: pass
+    text=' '.join(out).lower(); pos=sum(w in text for w in POSITIVE_NEWS); neg=sum(w in text for w in NEGATIVE_NEWS)
+    return out, (1 if pos>neg else -1 if neg>pos else 0)
 
-def calculate_rsi(close, period=14):
-    if close is None or len(close) < period + 1:
-        return None
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    if avg_loss.iloc[-1] == 0:
-        return 100.0 if avg_gain.iloc[-1] > 0 else 50.0
-    return num(100 - (100 / (1 + avg_gain.iloc[-1] / avg_loss.iloc[-1])))
+def intraday(symbol):
+    try: df=yf.Ticker(symbol).history(period='1d',interval='5m',auto_adjust=False)
+    except Exception: return {}
+    if df.empty or 'Close' not in df: return {}
+    c=pd.to_numeric(df['Close'],errors='coerce').dropna(); h=pd.to_numeric(df.get('High'),errors='coerce'); l=pd.to_numeric(df.get('Low'),errors='coerce'); v=pd.to_numeric(df.get('Volume'),errors='coerce')
+    if c.empty: return {}
+    cur=num(c.iloc[-1]); first=num(c.iloc[0]); chg=(cur/first-1)*100 if cur is not None and first not in (None,0) else None
+    ma5=num(c.rolling(5).mean().iloc[-1]) if len(c)>=5 else None; ma20=num(c.rolling(20).mean().iloc[-1]) if len(c)>=20 else None
+    irsi=rsi(c,14)
+    vwap=None
+    try:
+        tp=(h+l+c)/3; cv=v.fillna(0).cumsum(); val=(tp*v.fillna(0)).cumsum(); vwap=num(val.iloc[-1]/cv.iloc[-1]) if cv.iloc[-1]>0 else None
+    except Exception: pass
+    vr=None
+    try:
+        vv=v.dropna(); vr=num(vv.iloc[-1]/vv.tail(20).mean()) if len(vv)>=20 and vv.tail(20).mean() else None
+    except Exception: pass
+    return {'current':cur,'change':chg,'ma5':ma5,'ma20':ma20,'rsi':irsi,'vwap':vwap,'vwap_diff':(cur/vwap-1)*100 if cur is not None and vwap not in (None,0) else None,'high':safe_last(h.cummax().tail(1)) if not h.dropna().empty else None,'low':safe_last(l.cummin().tail(1)) if not l.dropna().empty else None,'volume_ratio':vr}
 
-def analyze(symbol):
-    ticker = yf.Ticker(symbol)
-    try: info = ticker.info or {}
-    except Exception: info = {}
-    try: hist = ticker.history(period="1y", auto_adjust=False)
-    except Exception: hist = pd.DataFrame()
-    try: income = ticker.financials
-    except Exception: income = pd.DataFrame()
-
-    price = safe_last(hist["Close"]) if not hist.empty and "Close" in hist else None
-    pe = num(info.get("trailingPE"))
-    forward_pe = num(info.get("forwardPE"))
-    pb = num(info.get("priceToBook"))
-    eps = num(info.get("trailingEps"))
-
-    roe = num(info.get("returnOnEquity"))
-    if roe is not None and abs(roe) < 1: roe *= 100
-    rg = num(info.get("revenueGrowth"))
-    if rg is not None and abs(rg) < 1: rg *= 100
-    pg = num(info.get("earningsGrowth"))
-    if pg is not None and abs(pg) < 1: pg *= 100
-    dy = num(info.get("dividendYield"))
-    if dy is not None and abs(dy) < 1: dy *= 100
-    pm = num(info.get("profitMargins"))
-    if pm is not None and abs(pm) < 1: pm *= 100
-    fcf = num(info.get("freeCashflow"))
-    de = num(info.get("debtToEquity"))
-    if de is not None: de /= 100
-
-    if rg is None: rg = growth_from(income, ["Total Revenue", "Operating Revenue"])
-    if pg is None: pg = growth_from(income, ["Net Income", "Net Income Common Stockholders"])
-
-    eps_growth = pg
-    peg = pe / pg if pe is not None and pg is not None and pg > 0 else None
-    news_titles = get_news_titles(ticker)
-
-    week52_high = num(info.get("fiftyTwoWeekHigh"))
-    week52_low = num(info.get("fiftyTwoWeekLow"))
-    if (week52_high is None or week52_low is None) and not hist.empty:
+def analyze(symbol, m):
+    t=yf.Ticker(symbol)
+    try: info=t.info or {}
+    except Exception: info={}
+    try: hist=t.history(period='1y',auto_adjust=False)
+    except Exception: hist=pd.DataFrame()
+    try: income=t.financials
+    except Exception: income=pd.DataFrame()
+    price=safe_last(hist['Close']) if not hist.empty and 'Close' in hist else None
+    pe=num(info.get('trailingPE')); fpe=num(info.get('forwardPE')); pb=num(info.get('priceToBook')); eps=num(info.get('trailingEps'))
+    roe=num(info.get('returnOnEquity')); rg=num(info.get('revenueGrowth')); pg=num(info.get('earningsGrowth')); dy=num(info.get('dividendYield')); pm=num(info.get('profitMargins')); fcf=num(info.get('freeCashflow')); de=num(info.get('debtToEquity'))
+    for key in ['roe','rg','pg','dy','pm']:
+        val=locals()[key]
+        if val is not None and abs(val)<1: locals()[key]=val*100
+    if de is not None: de/=100
+    if rg is None: rg=growth_from(income,['Total Revenue','Operating Revenue'])
+    if pg is None: pg=growth_from(income,['Net Income','Net Income Common Stockholders'])
+    epsg=pg; peg=pe/pg if pe is not None and pg is not None and pg>0 else None
+    news_titles,news_score=news(t)
+    wh=num(info.get('fiftyTwoWeekHigh')); wl=num(info.get('fiftyTwoWeekLow'))
+    if not hist.empty and (wh is None or wl is None):
         try:
-            one_year = hist.tail(252)
-            if week52_high is None: week52_high = num(one_year["High"].max())
-            if week52_low is None: week52_low = num(one_year["Low"].min())
-        except Exception:
-            pass
+            one=hist.tail(252); wh=wh if wh is not None else num(one['High'].max()); wl=wl if wl is not None else num(one['Low'].min())
+        except Exception: pass
+    score=0
+    if peg is not None: score+=20 if peg<=.8 else 12 if peg<=1.2 else 5 if peg<=1.8 else 0
+    if roe is not None: score+=15 if roe>=15 else 8 if roe>=10 else 3 if roe>=5 else 0
+    if dy is not None: score+=15 if dy>=4.5 else 10 if dy>=3 else 4 if dy>=1.5 else 0
+    if pm is not None: score+=10 if pm>=15 else 5 if pm>=8 else 0
+    if fcf is not None and fcf>0: score+=10
+    if rg is not None: score+=10 if rg>=15 else 5 if rg>=5 else 0
+    if pg is not None: score+=10 if pg>=20 else 5 if pg>=10 else 0
+    if de is not None: score+=5 if de<=.5 else 2 if de<=1 else 0
+    ma20=ma50=ma200=rsi14=None
+    if not hist.empty and 'Close' in hist:
+        c=pd.to_numeric(hist['Close'],errors='coerce').dropna(); ma20=num(c.rolling(20).mean().iloc[-1]) if len(c)>=20 else None; ma50=num(c.rolling(50).mean().iloc[-1]) if len(c)>=50 else None; ma200=num(c.rolling(200).mean().iloc[-1]) if len(c)>=200 else None; rsi14=rsi(c,14)
+        if price is not None and ma50 is not None and price>ma50: score+=2.5
+        if price is not None and ma200 is not None and price>ma200: score+=2.5
+    score=round(min(100,score),1)
+    fair=buy=None
+    if eps is not None and eps>0 and pg is not None and pg>=5:
+        fair=eps*min(max(pg,5),MAX_FAIR_PE); buy=fair*(1-BUY_ZONE_DISCOUNT)
+    mos=(fair-price)/fair*100 if fair is not None and price is not None else None
+    status='🟢 BUY' if score>=BUY_SCORE and price is not None and buy is not None and price<=buy else '🔴 OVERVALUED' if fair is not None and price is not None and price>fair*1.05 else '🟡 WATCH' if score>=WATCH_SCORE else '🔴 AVOID'
+    code=symbol.replace('.KL',''); name=info.get('shortName') or info.get('longName') or STOCK_NAMES.get(code,code); name=f'{name} ({code})' if name!=code else code
+    intra=intraday(symbol)
+    # Afternoon forecast: morning momentum + VWAP + volume + market
+    ap=0; ar=[]
+    if intra.get('change') is not None: ap += 2 if intra['change']>1 else -2 if intra['change']<-1 else 0
+    if intra.get('vwap_diff') is not None: ap += 2 if intra['vwap_diff']>.5 else -2 if intra['vwap_diff']<-.5 else 0
+    if price is not None and ma50 is not None: ap += 1 if price>ma50 else -1
+    if intra.get('rsi') is not None:
+        ap += 1 if 45<=intra['rsi']<=65 else -1 if intra['rsi']>75 else 1 if intra['rsi']<30 else 0
+    if intra.get('volume_ratio') is not None and intra['volume_ratio']>=1.5: ap += 1 if (intra.get('change') or 0)>=0 else -1
+    if m.get('chg') is not None: ap += 1 if m['chg']>.3 else -1 if m['chg']<-.3 else 0
+    afternoon='🟢 偏强' if ap>=5 else '🟢 震荡偏强' if ap>=2 else '🔴 偏弱' if ap<=-5 else '🔴 震荡偏弱' if ap<=-2 else '🟡 震荡'
+    # Next-day forecast: broader trend + fundamentals + close momentum + news + market
+    np=0; nr=[]
+    np += 2 if score>=80 else -2 if score<55 else 0
+    np += 1 if price is not None and ma20 is not None and price>ma20 else -1 if price is not None and ma20 is not None else 0
+    np += 1 if price is not None and ma50 is not None and price>ma50 else -1 if price is not None and ma50 is not None else 0
+    np += 1 if price is not None and ma200 is not None and price>ma200 else -1 if price is not None and ma200 is not None else 0
+    if rsi14 is not None: np += 1 if 45<=rsi14<=65 else -2 if rsi14>75 else 1 if rsi14<30 else 0
+    if intra.get('volume_ratio') is not None and intra['volume_ratio']>=1.5: np += 1 if (intra.get('change') or 0)>=0 else -1
+    np += news_score
+    if m.get('chg') is not None: np += 1 if m['chg']>.3 else -1 if m['chg']<-.3 else 0
+    nextday='🟢 偏强' if np>=6 else '🟢 震荡偏强' if np>=2 else '🔴 偏弱' if np<=-5 else '🔴 震荡偏弱' if np<=-2 else '🟡 震荡'
+    return dict(symbol=name,price=price,score=score,pe=pe,fpe=fpe,pb=pb,peg=peg,eps=eps,epsg=epsg,roe=roe,dy=dy,pm=pm,fcf=fcf,rg=rg,pg=pg,de=de,wh=wh,wl=wl,ma20=ma20,ma50=ma50,ma200=ma200,rsi14=rsi14,fair=fair,buy=buy,mos=mos,status=status,news=news_titles,news_score=news_score,intra=intra,afternoon=afternoon,nextday=nextday,ap=ap,np=np)
 
-    score = 0
-    if peg is not None: score += 20 if peg <= .8 else 12 if peg <= 1.2 else 5 if peg <= 1.8 else 0
-    if roe is not None: score += 15 if roe >= 15 else 8 if roe >= 10 else 3 if roe >= 5 else 0
-    if dy is not None: score += 15 if dy >= 4.5 else 10 if dy >= 3 else 4 if dy >= 1.5 else 0
-    if pm is not None: score += 10 if pm >= 15 else 5 if pm >= 8 else 0
-    if fcf is not None and fcf > 0: score += 10
-    if rg is not None: score += 10 if rg >= 15 else 5 if rg >= 5 else 0
-    if pg is not None: score += 10 if pg >= 20 else 5 if pg >= 10 else 0
-    if de is not None: score += 5 if de <= .5 else 2 if de <= 1 else 0
+def rsi_text(x):
+    if x is None:return 'N/A'
+    if x<30:return '🔵 Oversold'
+    if x<45:return '🟢 Attractive'
+    if x<60:return '🟢 Healthy'
+    if x<70:return '🟡 Strong'
+    return '🔴 Overbought'
 
-    tech = 0
-    ma20 = ma50 = ma200 = rsi14 = volume_ratio = support = resistance = None
+def trend_text(x):
+    p,a,b,c=x['price'],x['ma20'],x['ma50'],x['ma200']
+    if None not in (p,a,b,c): return '🟢 Strong Bullish' if p>a>b>c else '🟢 Bullish' if p>b else '🟡 Pullback' if p>c else '🔴 Bearish'
+    return '🟢 Above MA50' if p is not None and b is not None and p>b else '🔴 Below MA50' if p is not None and b is not None else 'N/A'
 
-    if not hist.empty and "Close" in hist.columns:
-        close = pd.to_numeric(hist["Close"], errors="coerce").dropna()
-        if len(close) >= 20: ma20 = num(close.rolling(20).mean().iloc[-1])
-        if len(close) >= 50: ma50 = num(close.rolling(50).mean().iloc[-1])
-        if len(close) >= 200: ma200 = num(close.rolling(200).mean().iloc[-1])
-        rsi14 = calculate_rsi(close, 14)
+def build(x):
+    intra=x['intra']; vol=intra.get('volume_ratio'); vtxt='N/A' if vol is None else f'{vol:.2f}x'
+    text=(f"\n<b>{html(x['symbol'])}</b> | {money(x['price'])} | Score {x['score']}/100\n\n"
+          f"💰 <b>VALUATION</b>\nPE {fmt(x['pe'])} | Forward PE {fmt(x['fpe'])} | P/B {fmt(x['pb'])}\nPEG {fmt(x['peg'])}\nFair Value {money(x['fair'])} | Buy Zone {money(x['buy'])}\nMargin of Safety {pct(x['mos'])}\n\n"
+          f"📈 <b>FUNDAMENTAL</b>\nEPS {money(x['eps'])} | EPS Growth {pct(x['epsg'])}\nROE {pct(x['roe'])} | DY {pct(x['dy'])} | Margin {pct(x['pm'])}\nRevenue G {pct(x['rg'])} | Profit G {pct(x['pg'])}\nDebt/Equity {fmt(x['de'])} | FCF {'Positive' if x['fcf'] is not None and x['fcf']>0 else 'N/A/Negative'}\n\n"
+          f"📍 <b>52 WEEK</b>\nHigh {money(x['wh'])} | Low {money(x['wl'])}\n\n"
+          f"📊 <b>TECHNICAL</b>\nMA20 {money(x['ma20'])} | MA50 {money(x['ma50'])} | MA200 {money(x['ma200'])}\nRSI14 {fmt(x['rsi14'])} {rsi_text(x['rsi14'])}\nVolume {vtxt}\nTrend {trend_text(x)}\n")
+    if MODE in ('lunch','close') and intra:
+        text += f"\n⏱ <b>SESSION</b>\nIntraday {pct(intra.get('change'))} | VWAP {money(intra.get('vwap'))} ({pct(intra.get('vwap_diff'))})\n5-bar MA {money(intra.get('ma5'))} | 20-bar MA {money(intra.get('ma20'))}\nSession High {money(intra.get('high'))} | Low {money(intra.get('low'))}\n"
+    if x['news']:
+        text += '\n📰 <b>NEWS</b>\n'+'\n'.join('• '+html(n) for n in x['news'][:2])+f"\n{'🟢' if x['news_score']>0 else '🔴' if x['news_score']<0 else '🟡'} News tone\n"
+    if MODE=='lunch': text += f"\n🔮 <b>AI MODEL — AFTERNOON</b>\n{x['afternoon']} | Model confidence {min(90,50+abs(x['ap'])*7)}%\n"
+    else: text += f"\n🔮 <b>AI MODEL — NEXT TRADING DAY</b>\n{x['nextday']} | Model confidence {min(92,50+abs(x['np'])*6)}%\n"
+    text += '⚠️ 模型情景判断，不是保证上涨/下跌的概率。\n'
+    return text
 
-        if "Volume" in hist.columns and len(hist) >= 20:
-            volume = pd.to_numeric(hist["Volume"], errors="coerce").dropna()
-            if len(volume) >= 20:
-                current = num(volume.iloc[-1])
-                average = num(volume.rolling(20).mean().iloc[-1])
-                if current is not None and average: volume_ratio = current / average
-
-        if len(hist) >= 20:
-            recent = hist.tail(20)
-            try:
-                support = num(recent["Low"].min())
-                resistance = num(recent["High"].max())
-            except Exception:
-                pass
-
-        if price is not None and ma50 is not None and price > ma50: tech += 2.5
-        if price is not None and ma200 is not None and price > ma200: tech += 2.5
-
-    score = round(min(100, score + tech), 1)
-
-    fair_value = buy_zone = None
-    if eps is not None and eps > 0 and pg is not None and pg >= 5:
-        fair_pe = min(max(pg, 5), MAX_FAIR_PE)
-        fair_value = eps * fair_pe
-        buy_zone = fair_value * (1 - BUY_ZONE_DISCOUNT)
-
-    discount = ((fair_value - price) / fair_value * 100
-                if fair_value is not None and price is not None else None)
-    margin_of_safety = discount
-
-    if fair_value is not None and price is not None:
-        if score >= BUY_SCORE and price <= buy_zone:
-            status = "🟢 BUY"
-        elif price > fair_value * 1.05:
-            status = "🔴 OVERVALUED"
-        else:
-            status = "🟡 WATCH"
-    else:
-        status = "🟢 BUY" if score >= BUY_SCORE else "🟡 WATCH" if score >= WATCH_SCORE else "🔴 AVOID"
-
-    code = symbol.replace(".KL", "")
-    raw_name = info.get("shortName") or info.get("longName") or STOCK_NAMES.get(code, code)
-    display_name = f"{raw_name} ({code})" if raw_name != code else code
-
-    return {
-        "symbol": display_name, "price": price, "score": score,
-        "pe": pe, "forward_pe": forward_pe, "pb": pb, "peg": peg,
-        "fair_value": fair_value, "buy_zone": buy_zone,
-        "discount": discount, "margin_of_safety": margin_of_safety,
-        "eps": eps, "eps_growth": eps_growth, "roe": roe, "dy": dy,
-        "pm": pm, "fcf": fcf, "rg": rg, "pg": pg, "de": de,
-        "week52_high": week52_high, "week52_low": week52_low,
-        "ma20": ma20, "ma50": ma50, "ma200": ma200, "rsi14": rsi14,
-        "volume_ratio": volume_ratio, "support": support, "resistance": resistance,
-        "status": status, "news": news_titles,
-        "ai_impact": get_ai_impact_analysis(score, dy, rg, pg, news_titles),
-    }
-
-def rsi_status(rsi):
-    if rsi is None: return "N/A"
-    if rsi < 30: return "🔵 Oversold"
-    if rsi < 45: return "🟢 Attractive"
-    if rsi < 60: return "🟢 Healthy"
-    if rsi < 70: return "🟡 Strong"
-    return "🔴 Overbought"
-
-def trend_status(price, ma20, ma50, ma200):
-    if price is not None and ma20 is not None and ma50 is not None and ma200 is not None:
-        if price > ma20 > ma50 > ma200: return "🟢 Strong Bullish"
-        if price > ma50: return "🟢 Bullish"
-        if price > ma200: return "🟡 Pullback"
-        return "🔴 Bearish"
-    if price is not None and ma50 is not None:
-        return "🟢 Above MA50" if price > ma50 else "🔴 Below MA50"
-    return "N/A"
-
-def volume_status(ratio):
-    if ratio is None: return "N/A"
-    if ratio >= 2: return "🔥 Very High"
-    if ratio >= 1.5: return "🟢 High"
-    if ratio >= .8: return "🟡 Normal"
-    return "🔵 Low"
-
-def build_stock_block(x):
-    fcf_status = "Positive" if x["fcf"] is not None and x["fcf"] > 0 else "N/A or Negative"
-    news_txt = "\n📰 NEWS\n• " + "\n• ".join(x["news"]) if x["news"] else ""
-
-    return (
-        f"\n{x['symbol']} | {money(x['price'])} | Score {x['score']}/100\n"
-        "\n💰 VALUATION\n"
-        f"PE {fmt_val(x['pe'])} | Forward PE {fmt_val(x['forward_pe'])} | P/B {fmt_val(x['pb'])}\n"
-        f"PEG {fmt_val(x['peg'])}\n"
-        f"Fair Value {money(x['fair_value'])} | Buy Zone {money(x['buy_zone'])}\n"
-        f"Margin of Safety {pct(x['margin_of_safety'])}\n"
-        "\n📈 FUNDAMENTAL\n"
-        f"EPS {money(x['eps'])} | EPS Growth {pct(x['eps_growth'])}\n"
-        f"ROE {pct(x['roe'])} | DY {pct(x['dy'])} | Margin {pct(x['pm'])}\n"
-        f"Revenue G {pct(x['rg'])} | Profit G {pct(x['pg'])}\n"
-        f"Debt/Equity {fmt_val(x['de'])} | FCF {fcf_status}\n"
-        "\n📍 52 WEEK\n"
-        f"High {money(x['week52_high'])} | Low {money(x['week52_low'])}\n"
-        "\n📊 TECHNICAL\n"
-        f"MA20 {money(x['ma20'])} | MA50 {money(x['ma50'])} | MA200 {money(x['ma200'])}\n"
-        f"RSI14 {fmt_val(x['rsi14'])} {rsi_status(x['rsi14'])}\n"
-        f"Volume {fmt_val(x['volume_ratio'], '{:.2f}')}x {volume_status(x['volume_ratio'])}\n"
-        f"Trend {trend_status(x['price'], x['ma20'], x['ma50'], x['ma200'])}\n"
-        f"Support {money(x['support'])} | Resistance {money(x['resistance'])}\n"
-        f"{news_txt}\n"
-        f"\n💡 AI IMPACT\n{x['ai_impact']}\n"
-    )
-
-def split_telegram_messages(text, max_length=4000):
-    if len(text) <= max_length: return [text]
-    sections = text.split("\n\n")
-    messages, current = [], ""
-    for section in sections:
-        candidate = section if not current else current + "\n\n" + section
-        if len(candidate) <= max_length:
-            current = candidate
-        else:
-            if current: messages.append(current)
-            while len(section) > max_length:
-                messages.append(section[:max_length])
-                section = section[max_length:]
-            current = section
-    if current: messages.append(current)
-    return messages
+def split_msgs(text,limit=4000):
+    if len(text)<=limit:return [text]
+    parts=text.split('\n\n'); out=[]; cur=''
+    for p in parts:
+        if cur and len(cur)+2+len(p)>limit: out.append(cur); cur=p
+        else: cur=p if not cur else cur+'\n\n'+p
+    if cur:out.append(cur)
+    return out
 
 def send(text):
-    if not TOKEN or not CHAT_ID:
-        print("Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID environment variable is missing!")
-        return
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    for message in split_telegram_messages(text):
-        response = requests.post(
-            url,
-            data={"chat_id": CHAT_ID, "text": message},
-            timeout=20,
-        )
-        response.raise_for_status()
+    if not TOKEN or not CHAT_ID: raise RuntimeError('Missing TELEGRAM_TOKEN/TELEGRAM_CHAT_ID')
+    for m in split_msgs(text):
+        r=requests.post(f'https://api.telegram.org/bot{TOKEN}/sendMessage',data={'chat_id':CHAT_ID,'text':m,'parse_mode':'HTML','disable_web_page_preview':True},timeout=20); r.raise_for_status()
 
 def main():
-    try:
-        with open("stocks.txt", encoding="utf8") as f:
-            syms = [
-                x.strip().upper().lstrip("$")
-                for x in f
-                if x.strip() and not x.strip().startswith("#")
-            ]
-    except Exception as e:
-        print(f"Unable to read stocks.txt: {e}")
-        return
-
-    syms = [x if x.endswith(".KL") else x + ".KL" for x in syms]
-    out = []
-
-    for symbol in syms:
+    if MODE not in ('lunch','close'): MODE='close'
+    syms=[]
+    with open('stocks.txt',encoding='utf8') as f:
+        syms=[x.strip().upper().lstrip('$') for x in f if x.strip() and not x.strip().startswith('#')]
+    syms=[x if x.endswith('.KL') else x+'.KL' for x in syms]
+    m=macro(); out=[]
+    for s in syms:
         try:
-            result = analyze(symbol)
-            if result and result.get("price") is not None:
-                out.append(result)
-        except Exception as e:
-            print(f"Skipping {symbol}: {e}")
+            z=analyze(s,m)
+            if z.get('price') is not None: out.append(z)
+        except Exception as e: print(f'Skipping {s}: {e}')
+    if not out: print('No valid stock data returned.'); return
+    out.sort(key=lambda x:x['score'],reverse=True)
+    title='☀️ KLSE SMART — LUNCH REPORT' if MODE=='lunch' else '🌙 KLSE SMART — MARKET CLOSE REPORT'
+    if MODE=='lunch':
+        bp=sum(x['ap']>=2 for x in out); bw=sum(x['ap']<=-2 for x in out); forecast='🟢 Afternoon bias stronger' if bp>bw else '🔴 Afternoon bias weaker' if bw>bp else '🟡 Afternoon mixed'
+    else:
+        bp=sum(x['np']>=2 for x in out); bw=sum(x['np']<=-2 for x in out); forecast='🟢 Next-day bias stronger' if bp>bw else '🔴 Next-day bias weaker' if bw>bp else '🟡 Next-day mixed'
+    lines=[f'<b>{title}</b>',f"{datetime.now(TZ):%d %b %Y %H:%M}",'',macro_text(m),f'🔮 <b>MODEL OUTLOOK</b>\n{forecast}\nBullish candidates: {bp} | Bearish candidates: {bw}\n']
+    for label,status in [('🟢 BUY ZONE','🟢 BUY'),('🟡 WATCHLIST','🟡 WATCH'),('🔴 OVERVALUED','🔴 OVERVALUED'),('🔴 AVOID','🔴 AVOID')]:
+        g=[x for x in out if x['status']==status]
+        if g:
+            lines.append(f'<b>{label}</b>'); lines.extend(build(x) for x in g)
+    lines.append('\n⚠️ <b>DISCLAIMER</b>\n模型预测是规则化情景分析，不是保证收益；免费行情可能延迟、缺失或与正式Bursa实时数据不同。')
+    send('\n'.join(lines)); print(f'{MODE} report sent: {len(out)} stocks')
 
-    if not out:
-        print("No valid stock data returned.")
-        return
-
-    out.sort(key=lambda x: x["score"], reverse=True)
-    now = datetime.now(TZ)
-
-    lines = [
-        "📊 KLSE SMART REPORT",
-        f"{now:%d %b %Y %H:%M}",
-        "",
-        get_macro_summary(),
-    ]
-
-    groups = [
-        ("🟢 BUY ZONE", "🟢 BUY"),
-        ("🟡 WATCHLIST", "🟡 WATCH"),
-        ("🔴 OVERVALUED", "🔴 OVERVALUED"),
-        ("🔴 AVOID", "🔴 AVOID"),
-    ]
-
-    for label, status in groups:
-        stocks = [x for x in out if x["status"] == status]
-        if not stocks: continue
-        lines.append(f"\n{label}")
-        for stock in stocks:
-            lines.append(build_stock_block(stock))
-
-    lines.append(
-        "\n⚠️ SCREENING TOOL ONLY\n"
-        "Not financial advice. Yahoo Finance/free-market data may be delayed, "
-        "incomplete, or occasionally incorrect."
-    )
-
-    try:
-        send("\n".join(lines))
-        print(f"Report sent successfully! {len(out)} stocks analyzed.")
-    except Exception as e:
-        print(f"Error sending message: {e}")
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__': main()
