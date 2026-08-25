@@ -228,10 +228,10 @@ def analyze(symbol, m):
     intra = intraday(symbol)
 
     # ==========================================
-    # 🤖 AI 多模型并行评估引擎
+    # 🤖 AI 多模型评论与评分引擎
     # ==========================================
 
-    # 1️⃣ 🏛️ 模型 A：价值与股息模型 (Value AI)
+    # 1️⃣ 🏛️ 模型 A：价值与股息视角 (Value View)
     val_score = 0
     if is_bank:
         if dy is not None: val_score += 40 if dy >= 6.0 else 30 if dy >= 5.0 else 20 if dy >= 4.0 else 10 if dy >= 3.0 else 0
@@ -243,7 +243,7 @@ def analyze(symbol, m):
         if peg is not None: val_score += 20 if peg <= 0.8 else 12 if peg <= 1.2 else 5 if peg <= 1.8 else 0
         if de is not None: val_score += 15 if de <= 0.5 else 8 if de <= 1.0 else 0
 
-    # 2️⃣ ⚡ 模型 B：技术与动能模型 (Momentum AI)
+    # 2️⃣ ⚡ 模型 B：技术与动能视角 (Momentum View)
     mom_score = 50
     if price is not None and ma20 is not None and price > ma20: mom_score += 10
     if price is not None and ma50 is not None and price > ma50: mom_score += 15
@@ -255,7 +255,7 @@ def analyze(symbol, m):
     if intra.get('volume_ratio') is not None and intra['volume_ratio'] >= 1.5:
         mom_score += 10 if (intra.get('change') or 0) >= 0 else -10
 
-    # 3️⃣ 🛡️ 模型 C：风险与情绪模型 (Risk AI)
+    # 3️⃣ 🛡️ 模型 C：风险与情绪视角 (Risk View)
     risk_score = 50
     risk_score += news_score * 20
     if m.get('chg') is not None: risk_score += 15 if m['chg'] > 0.3 else -15 if m['chg'] < -0.3 else 0
@@ -301,15 +301,15 @@ def analyze(symbol, m):
     name_label = STOCK_NAMES.get(code, code)
     name = f"{name_label} ({code})" if not name_label.endswith(f"({code})") else name_label
 
-    # 模型会诊判定
+    # --- AI 多视角评论建议结论 ---
     if val_score >= 70 and mom_score >= 60:
-        consensus = "🟢 双核看多：价值与动能形成合力"
+        consensus = "🟢 建议逢低关注：基本面低估且技术面强劲，形成多头合力。"
     elif val_score >= 70 and mom_score < 50:
-        consensus = "🟡 模型分歧：低估值高股息，但技术面仍需打底（适合分批）"
+        consensus = "🟡 建议分批布局：估值吸引且股息高，但短线技术面尚待打底。"
     elif val_score < 50 and mom_score >= 70:
-        consensus = "🟡 模型分歧：短线动能强劲，但基本面估值偏贵（适合短线）"
+        consensus = "🟡 建议短线波段：短线资金动能较强，但基本面估值偏贵，注意止盈。"
     else:
-        consensus = "🔴 观望避险：基本面与技术面动能均显不足"
+        consensus = "🔴 建议暂时观望：基本面无明显边际改善，技术面动能匮乏。"
 
     return dict(
         symbol=name, price=price, score=score, val_score=val_score, mom_score=mom_score, risk_score=risk_score,
@@ -339,32 +339,32 @@ def build(x):
     fcf_desc = "金融股不适用" if x['is_bank'] else ("正向现金流 🟢" if x['fcf'] is not None and x['fcf'] > 0 else "现金流受压/暂无数据 🔴")
     de_desc = "金融股不适用" if x['is_bank'] else fmt(x['de'])
     
-    val_flag = "🟢 看多" if x['val_score'] >= 70 else "🟡 中性" if x['val_score'] >= 50 else "🔴 看空"
-    mom_flag = "🟢 看多" if x['mom_score'] >= 65 else "🟡 中性" if x['mom_score'] >= 50 else "🔴 看空"
-    risk_flag = "🟢 安全" if x['risk_score'] >= 60 else "🟡 中立" if x['risk_score'] >= 45 else "🔴 预警"
+    val_flag = "🟢 偏好" if x['val_score'] >= 70 else "🟡 中立" if x['val_score'] >= 50 else "🔴 偏弱"
+    mom_flag = "🟢 偏好" if x['mom_score'] >= 65 else "🟡 中立" if x['mom_score'] >= 50 else "🔴 偏弱"
+    risk_flag = "🟢 偏好" if x['risk_score'] >= 60 else "🟡 中立" if x['risk_score'] >= 45 else "🔴 预警"
 
     text = (
-        f"\n<b>{html(x['symbol'])}</b> | 现价: {money(x['price'])} | 综合得分: <b>{x['score']}/100</b>\n\n"
-        f"🤖 <b>多 AI 模型对比会诊</b>\n"
-        f"• 🏛️ 价值模型 (Value AI): <b>{x['val_score']}分</b> [{val_flag}]\n"
-        f"• ⚡ 动能模型 (Momentum AI): <b>{x['mom_score']}分</b> [{mom_flag}]\n"
-        f"• 🛡️ 风险与宏观 (Risk AI): <b>{x['risk_score']}分</b> [{risk_flag}]\n"
-        f"💡 <b>多方会诊结论</b>: {x['consensus']}\n\n"
-        f"💰 <b>估值分析与买点</b>\n市盈率 (PE): {fmt(x['pe'])} | 预估 PE: {fmt(x['fpe'])} | 市净率 (PB): {fmt(x['pb'])}\n"
+        f"\n<b>{html(x['symbol'])}</b> | 现价: {money(x['price'])} | 综合评分: <b>{x['score']}/100</b>\n\n"
+        f"💬 <b>多 AI 视角评论分析</b>\n"
+        f"• 🏛️ 价值模型评级: <b>{x['val_score']}分</b> [{val_flag}]\n"
+        f"• ⚡ 动能模型评级: <b>{x['mom_score']}分</b> [{mom_flag}]\n"
+        f"• 🛡️ 风险/情绪评级: <b>{x['risk_score']}分</b> [{risk_flag}]\n"
+        f"💡 <b>综合操作建议</b>: {x['consensus']}\n\n"
+        f"💰 <b>估值分析与参考买点</b>\n市盈率 (PE): {fmt(x['pe'])} | 预估 PE: {fmt(x['fpe'])} | 市净率 (PB): {fmt(x['pb'])}\n"
         f"合理价值 (Fair Value): {money(x['fair'])}\n建议买入区 (Buy Zone): <b>{money(x['buy'])}</b>\n"
         f"安全边际 (Margin of Safety): <b>{pct(x['mos'])}</b>\n\n"
         f"📈 <b>价值与股息基本面</b>\n股息率 (Dividend Yield): <b>{pct(x['dy'])}</b> | ROE: <b>{pct(x['roe'])}</b>\n"
         f"每股收益 (EPS): {money(x['eps'])} | EPS增长率: {pct(x['epsg'])}\n"
         f"营收增长: {pct(x['rg'])} | 净利润率: {pct(x['pm'])}\n"
         f"债务/权益比 (D/E): {de_desc} | 自由现金流 (FCF): {fcf_desc}\n\n"
-        f"📊 <b>技术与趋势</b>\nMA20: {money(x['ma20'])} | MA50: {money(x['ma50'])} | MA200: {money(x['ma200'])}\n"
+        f"📊 <b>技术与趋势评论</b>\nMA20: {money(x['ma20'])} | MA50: {money(x['ma50'])} | MA200: {money(x['ma200'])}\n"
         f"RSI14: {fmt(x['rsi14'])} ({rsi_text(x['rsi14'])})\n成交量比率: {vtxt} | 趋势判断: {trend_text(x)}\n"
     )
     if MODE in ('lunch', 'close') and intra:
-        text += f"\n⏱ <b>盘中分时监测</b>\n今日涨跌: {pct(intra.get('change'))} | VWAP: {money(intra.get('vwap'))} ({pct(intra.get('vwap_diff'))})\n最高: {money(intra.get('high'))} | 最低: {money(intra.get('low'))}\n"
+        text += f"\n⏱ <b>盘中分时数据参考</b>\n今日涨跌: {pct(intra.get('change'))} | VWAP: {money(intra.get('vwap'))} ({pct(intra.get('vwap_diff'))})\n最高: {money(intra.get('high'))} | 最低: {money(intra.get('low'))}\n"
     if x['news']:
-        text += '\n📰 <b>最新新闻情绪</b>\n' + '\n'.join('• ' + html(n) for n in x['news'][:2]) + f"\n情绪偏向: {'🟢 积极' if x['news_score'] > 0 else '🔴 谨慎' if x['news_score'] < 0 else '🟡 中性'}\n"
-    text += '⚠️ 本报告为多AI模型对比定量分析，不构成个人投资建议。\n'
+        text += '\n📰 <b>最新新闻与舆情评论</b>\n' + '\n'.join('• ' + html(n) for n in x['news'][:2]) + f"\n舆情倾向: {'🟢 积极' if x['news_score'] > 0 else '🔴 谨慎' if x['news_score'] < 0 else '🟡 中性'}\n"
+    text += '⚠️ 本报告为 AI 多模型定量评论与建议，仅供交流参考，不构成个人招揽或买卖依据。\n'
     return text
 
 def split_msgs(text, limit=4000):
@@ -408,7 +408,7 @@ def main():
         print('未能获取到有效股票数据。')
         return
     out.sort(key=lambda x: x['score'], reverse=True)
-    title = '☀️ 马股智能研报 — 多AI模型午盘分析' if mode == 'lunch' else '🌙 马股智能研报 — 多AI模型收盘总评'
+    title = '☀️ 马股智能研报 — 多AI模型午盘评论建议' if mode == 'lunch' else '🌙 马股智能研报 — 多AI模型收盘总评与建议'
     
     val_bulls = sum(x['val_score'] >= 70 for x in out)
     mom_bulls = sum(x['mom_score'] >= 65 for x in out)
@@ -418,7 +418,7 @@ def main():
         f"📅 报告时间: {datetime.now(TZ):%Y年%m月%d日 %H:%M}",
         '',
         macro_text(m),
-        f'🔮 <b>多模型大盘诊断</b>\n🏛️ 价值模型看多股票数: <b>{val_bulls}</b> 只\n⚡ 动能模型看多股票数: <b>{mom_bulls}</b> 只\n'
+        f'💬 <b>大盘多模型评论总结</b>\n🏛️ 价值视角看好标的: <b>{val_bulls}</b> 只\n⚡ 动能视角看好标的: <b>{mom_bulls}</b> 只\n'
     ]
     for label, status in [('🟢 建议买入区间 (高安全边际)', '🟢 BUY'), ('🟡 密切关注清单 (优质标的)', '🟡 WATCH'), ('🔴 估值偏高 (建议逢高减仓)', '🔴 OVERVALUED'), ('🔴 暂宜回避 (基本面受压)', '🔴 AVOID')]:
         g = [x for x in out if x['status'] == status]
