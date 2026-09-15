@@ -2,12 +2,9 @@ name: KLSE Smart V3
 
 on:
   schedule:
-    # 转换为 UTC 时间（马文 GMT+8 需减去 8 小时）
-    # 示例 1: 13:15 GMT+8 (午市开盘) -> UTC 05:15
     - cron: '15 5 * * 1-5'
-    # 示例 2: 17:50 GMT+8 (收盘后)   -> UTC 09:50
     - cron: '50 9 * * 1-5'
-  workflow_dispatch: # 允许在 GitHub 界面随时手动点击测试运行
+  workflow_dispatch:
 
 jobs:
   run-script:
@@ -15,10 +12,10 @@ jobs:
 
     steps:
     - name: 检出仓库代码
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # 升级至 v4
 
     - name: 配置 Python 环境
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5  # 升级至 v5
       with:
         python-version: '3.10'
 
