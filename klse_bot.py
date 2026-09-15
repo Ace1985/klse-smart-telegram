@@ -16,7 +16,7 @@ WATCHLIST = {
     "CCK Consolidated": "7035.KL",
     "Teo Seng Capital": "7252.KL",
     "MR D.I.Y.": "5296.KL",
-    "LAC Med": "LACMED.KL"  # 使用通用代码或 5341.KL
+    "LAC Med": "5341.KL"
 }
 
 def get_stock_prices():
@@ -24,10 +24,11 @@ def get_stock_prices():
     for name, ticker in WATCHLIST.items():
         try:
             stock = yf.Ticker(ticker)
-            df = stock.history(period="5d") # 抓取 5 天数据，防止遇到节假日无数据
+            # 抓取近 7 天数据，防止碰上周末或假期无数据
+            df = stock.history(period="7d")
             
-            # 校验数据是否为空
-            if df.empty or len(df) < 1:
+            # 【关键防护 1】判断是否获取到了有效的股价列
+            if df is None or df.empty or 'Close' not in df.columns or len(df['Close']) == 0:
                 results.append(f"⚠️ <b>{name}</b> ({ticker.split('.')[0]}): 暂无最新数据")
                 continue
 
@@ -50,9 +51,9 @@ def get_stock_prices():
             results.append(line)
 
         except Exception as e:
-            # 容错处理：单只股票出错不影响其他股票执行
-            print(f"抓取 {name} 出错: {e}")
-            results.append(f"⚠️ <b>{name}</b>: 获取失败")
+            # 【关键防护 2】捕获所有异常，绝不让脚本崩溃退出
+            print(f"[Error] 抓取 {name} ({ticker}) 异常: {e}")
+            results.append(f"⚠️ <b>{name}</b> ({ticker.split('.')[0]}): 获取失败")
 
     return results
 
@@ -63,15 +64,19 @@ def send_telegram_message(message):
         "text": message,
         "parse_mode": "HTML"
     }
-    response = requests.post(url, json=payload)
-    return response.json()
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        print(f"发送 Telegram 消息失败: {e}")
+        return {}
 
 if __name__ == "__main__":
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("错误：未找到 Telegram Token 或 Chat ID 环境变量")
+        print("错误：未设置 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID 环境变量！")
         exit(1)
 
-    print("正在抓取精选 9 只股票数据...")
+    print("开始获取精选 9 只马股最新数据...")
     stock_lines = get_stock_prices()
     
     header = "📊 <b>【KLSE 精选股每日简报】</b>\n" \
@@ -84,6 +89,6 @@ if __name__ == "__main__":
     
     res = send_telegram_message(full_message)
     if res.get("ok"):
-        print("消息成功发送至 Telegram！")
+        print("✅ 消息已成功发送至 Telegram！")
     else:
-        print(f"发送失败: {res}")
+        print(f"❌ 发送失败，Telegram API 返回: {res}")
