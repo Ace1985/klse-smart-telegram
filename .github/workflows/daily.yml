@@ -29,6 +29,6 @@ jobs:
 
     - name: 执行股票抓取与推送
       env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN: "把你的BotToken直接粘贴在这引号内"
+        TELEGRAM_CHAT_ID: "把你的ChatID直接粘贴在这引号内"
       run: python klse_bot.py
