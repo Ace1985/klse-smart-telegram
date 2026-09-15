@@ -2,9 +2,9 @@ import os
 import requests
 import yfinance as yf
 
-# Telegram 环境变量
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# 从 GitHub Secrets / 环境变量获取 Token 和 Chat ID
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 # 精选 9 只目标股票字典
 WATCHLIST = {
@@ -24,17 +24,17 @@ def get_stock_prices():
     for name, ticker in WATCHLIST.items():
         try:
             stock = yf.Ticker(ticker)
-            # 抓取近 7 天数据，防止碰上周末或假期无数据
+            # 抓取近 7 天数据，防止周末或节假日数据缺失
             df = stock.history(period="7d")
             
-            # 【关键防护 1】判断是否获取到了有效的股价列
-            if df is None or df.empty or 'Close' not in df.columns or len(df['Close']) == 0:
+            # 校验数据是否获取成功
+            if df is None or df.empty or 'Close' not in df.columns:
                 results.append(f"⚠️ <b>{name}</b> ({ticker.split('.')[0]}): 暂无最新数据")
                 continue
 
             latest_price = df['Close'].iloc[-1]
             
-            # 计算今日涨跌额与涨跌幅
+            # 计算涨跌额与涨跌幅
             if len(df) >= 2:
                 prev_close = df['Close'].iloc[-2]
                 change = latest_price - prev_close
@@ -51,8 +51,7 @@ def get_stock_prices():
             results.append(line)
 
         except Exception as e:
-            # 【关键防护 2】捕获所有异常，绝不让脚本崩溃退出
-            print(f"[Error] 抓取 {name} ({ticker}) 异常: {e}")
+            print(f"[Error] 抓取 {name} ({ticker}) 失败: {e}")
             results.append(f"⚠️ <b>{name}</b> ({ticker.split('.')[0]}): 获取失败")
 
     return results
@@ -68,12 +67,17 @@ def send_telegram_message(message):
         response = requests.post(url, json=payload, timeout=10)
         return response.json()
     except Exception as e:
-        print(f"发送 Telegram 消息失败: {e}")
+        print(f"发送 Telegram 消息异常: {e}")
         return {}
 
 if __name__ == "__main__":
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("错误：未设置 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID 环境变量！")
+    # 打印排查日志
+    print("正在检查环境变量...")
+    if not TELEGRAM_BOT_TOKEN:
+        print("❌ 错误：TELEGRAM_BOT_TOKEN 未设置或为空！请检查 GitHub Repository Secrets。")
+        exit(1)
+    if not TELEGRAM_CHAT_ID:
+        print("❌ 错误：TELEGRAM_CHAT_ID 未设置或为空！请检查 GitHub Repository Secrets。")
         exit(1)
 
     print("开始获取精选 9 只马股最新数据...")
@@ -89,6 +93,6 @@ if __name__ == "__main__":
     
     res = send_telegram_message(full_message)
     if res.get("ok"):
-        print("✅ 消息已成功发送至 Telegram！")
+        print("✅ 消息已成功推送至 Telegram！")
     else:
-        print(f"❌ 发送失败，Telegram API 返回: {res}")
+        print(f"❌ 推送失败，Telegram 返回错误: {res}")
