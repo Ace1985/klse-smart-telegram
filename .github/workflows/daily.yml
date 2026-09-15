@@ -7,7 +7,7 @@ on:
     - cron: '15 5 * * 1-5'
     # 2. 17:50 GMT+8 (收盘后)   -> UTC 09:50
     - cron: '50 9 * * 1-5'
-  workflow_dispatch: # 允许在 GitHub Actions 页面手动点击 "Run workflow" 测试
+  workflow_dispatch: # 支持在 GitHub Actions 页面手动点击运行
 
 jobs:
   run-script:
@@ -29,6 +29,6 @@ jobs:
 
     - name: 执行股票抓取与推送
       env:
-        TELEGRAM_BOT_TOKEN: "把你的BotToken直接粘贴在这引号内"
-        TELEGRAM_CHAT_ID: "把你的ChatID直接粘贴在这引号内"
+        TELEGRAM_BOT_TOKEN: "8962341800:AAHh9SLwcEOu-fL8mPehRIwtHo6SL9DBZZ0"
+        TELEGRAM_CHAT_ID: "1784673116"
       run: python klse_bot.py
